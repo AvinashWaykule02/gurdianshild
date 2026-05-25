@@ -7,21 +7,25 @@ const app = express();
 
 
 // middleware 
-app.use(cors());
+app.use(cors({
+    origin: true,
+    credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(morgan("dev"));
 
-// routes
+// routes - take files 
+const authRoutes = require("./routes/authRoute");
+const transactionRoutes = require("./routes/transactionRoute");
+const securityRoutes = require("./routes/securityRoute");
+
+// map routing 
+app.use("/api/auth", authRoutes);
+app.use("/api/transaction", transactionRoutes);
+app.use("/api/security", securityRoutes);
 
 
-
-
-// build server 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
 
 module.exports = app;
