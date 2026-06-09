@@ -1,256 +1,115 @@
-const mongoose = require('mongoose');
+// services/transactionService.js
 
-const Transaction = require('../models/transaction');
-const SecurityLog = require('../models/securityLogs');
-
-const { generateHash } = require('../algorithams/generateHash');
-
-
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
 /*
 |--------------------------------------------------------------------------
-| Create Secure Transaction
+| CREATE TRANSACTION + OUTBOX EVENT (ATOMIC)
 |--------------------------------------------------------------------------
-| Steps:
-| 1. Start MongoDB transaction
-| 2. Save transaction
-| 3. Get previous hash
-| 4. Create snapshot
-| 5. Generate current hash
-| 6. Save security log
-| 7. Commit transaction
+| 1. Create Transaction
+| 2. Create AuditOutbox record
 |--------------------------------------------------------------------------
 */
-
-async function createTransaction(userId, payload) {
-
-  // Start MongoDB session
-  const session = await mongoose.startSession();
-
-  // Start ACID transaction
-  session.startTransaction();
-
-
-  try {
-
-    /*
-    |--------------------------------------------------------------------------
-    | STEP 1 → Create Transaction
-    |--------------------------------------------------------------------------
-    */
-
-    const [transaction] = await Transaction.create(
-
-      [
-        {
-          userId,
-
-          ...payload,
-
-          status: 'completed'
-        }
-      ],
-
-      { session }
-    );
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | STEP 2 → Get Latest User Security Log
-    |--------------------------------------------------------------------------
-    */
-
-    const latestLog = await SecurityLog
-
-      .findOne({ userId })
-
-      .sort({ _id: -1 })
-
-      .select('currentHash')
-
-      .session(session);
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | STEP 3 → Get Previous Hash
-    |--------------------------------------------------------------------------
-    */
-
-    const previousHash = latestLog
-      ? latestLog.currentHash
-      : null;
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | STEP 4 → Create Immutable Transaction Snapshot
-    |--------------------------------------------------------------------------
-    */
-
-    const transactionSnapshot = {
-
-      _id: transaction._id.toString(),
-
-      userId: transaction.userId.toString(),
-
-      amount: transaction.amount,
-
-      type: transaction.type,
-
-      description: transaction.description,
-
-      status: transaction.status,
-
-      createdAt: transaction.createdAt,
-    };
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | STEP 5 → Generate Current Hash
-    |--------------------------------------------------------------------------
-    */
-
-    const timestamp = new Date();
-
-    const currentHash = generateHash(
-
-      transactionSnapshot,
-
-      previousHash,
-
-      timestamp
-    );
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | STEP 6 → Save Security Audit Log
-    |--------------------------------------------------------------------------
-    */
-
-    await SecurityLog.create(
-
-      [
-        {
-          userId,
-
-          transactionId: transaction._id,
-
-          transactionData: transactionSnapshot,
-
-          currentHash,
-
-          previousHash,
-
-          timestamp,
-        },
-      ],
-
-      { session }
-    );
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | STEP 7 → Commit Database Transaction
-    |--------------------------------------------------------------------------
-    */
-
-    await session.commitTransaction();
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Close Session
-    |--------------------------------------------------------------------------
-    */
-
-    session.endSession();
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Return Final Result
-    |--------------------------------------------------------------------------
-    */
+async function createTransaction(
+  userId,
+  {
+    amount,
+    description,
+  }
+) {
+
+  // Validation
+  if (!userId) {
+    throw new Error("User ID is required");
+  }
+
+  if (!amount || amount <= 0) {
+    throw new Error("Invalid amount");
+  }
+
+  if (!description) {
+    throw new Error("Description is required");
+  }
+
+  return await prisma.$transaction(async (tx) => {
+
+    // 1. Create transaction
+    const transaction = await tx.transaction.create({
+      data: {
+        userId,
+        amount,
+        description,
+      },
+    });
+
+    // 2. Create outbox event
+    const outboxEvent = await tx.auditOutbox.create({
+      data: {
+        transactionId: transaction.id,
+        payload: transaction,
+        status: "PENDING",
+      },
+    });
 
     return {
-
       transaction,
-
-      currentHash,
-
-      previousHash
+      outboxEvent,
     };
-
-  }
-
-  catch (err) {
-
-    /*
-    |--------------------------------------------------------------------------
-    | Rollback All Changes If Error Occurs
-    |--------------------------------------------------------------------------
-    */
-
-    await session.abortTransaction();
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Close Session
-    |--------------------------------------------------------------------------
-    */
-
-    session.endSession();
-
-
-    // Send error to controller
-    throw err;
-  }
+  });
 }
-
-
-
 
 /*
 |--------------------------------------------------------------------------
-| Get All Transactions Of User
+| GET TRANSACTION BY ID
 |--------------------------------------------------------------------------
 */
+async function getTransactionById(id) {
+
+  const transaction = await prisma.transaction.findUnique({
+    where: {
+      id: Number(id),
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+  });
+
+  if (!transaction) {
+    throw new Error("Transaction not found");
+  }
+
+  return transaction;
+}
 
 async function getTransactions(userId) {
-
-  return Transaction
-
-    .find({ userId })
-
-    .sort({ createdAt: -1 });
+  return prisma.transaction.findMany({
+    where: {
+      userId: Number(userId),
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+  });
 }
 
-
-
-
-/*
-|--------------------------------------------------------------------------
-| Export Functions
-|--------------------------------------------------------------------------
-*/
-
 module.exports = {
-
   createTransaction,
-
-  getTransactions
+  getTransactions,
+  getTransactionById,
 };

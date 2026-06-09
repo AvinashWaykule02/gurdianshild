@@ -1,37 +1,88 @@
-const { verifyUserHashChain } = require('../algorithams/verifyHashchain');
-const SecurityIncident = require('../models/securityIncident');
+const prisma = require("../config/prisma");
+const { verifyUserHashChain } = require("../algorithams/verifyHashchain");
 
+/**
+ * VERIFY HASH CHAIN INTEGRITY
+ */
 async function verifyIntegrity(req, res) {
   try {
-    const userId = req.query.userId || req.user?._id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const userId = req.query.userId || req.user?.userId;
 
-    const result = await verifyUserHashChain(userId);
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
-    res.json({
-      userId,
-      integrity: result.valid ? 'VERIFIED' : 'COMPROMISED',
+    const result = await verifyUserHashChain(Number(userId));
+
+    return res.status(200).json({
+      success: true,
+      userId: Number(userId),
+      integrity: result.valid ? "VERIFIED" : "COMPROMISED",
       totalChecked: result.totalChecked,
       incidents: result.incidents,
     });
   } catch (err) {
-    console.error('verifyIntegrity error:', err);
-    res.status(500).json({ error: err.message });
+    console.error("verifyIntegrity error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 }
 
+/**
+ * GET SECURITY INCIDENTS (AUDIT LOG VIEW)
+ */
 async function getIncidents(req, res) {
   try {
     const userId = req.query.userId;
-    const query  = userId ? { affectedUser: userId } : {};
-    const incidents = await SecurityIncident.find(query)
-      .populate('affectedUser', 'name email')
-      .populate('affectedTransaction')
-      .sort({ detectedAt: -1 });
-    res.json({ incidents });
+
+    const incidents = await prisma.securityLog.findMany({
+      where: userId
+        ? {
+            transaction: {
+              userId: Number(userId),
+            },
+          }
+        : {},
+
+      orderBy: {
+        createdAt: "desc",
+      },
+
+      include: {
+        transaction: {
+          select: {
+            id: true,
+            userId: true,
+            amount: true,
+            description: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: incidents.length,
+      incidents,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("getIncidents error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 }
 
-module.exports = { verifyIntegrity, getIncidents };
+module.exports = {
+  verifyIntegrity,
+  getIncidents,
+};

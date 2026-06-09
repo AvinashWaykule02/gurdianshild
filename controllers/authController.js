@@ -1,27 +1,40 @@
-const User = require("../models/user");
+const prisma = require("../config/prisma");
+
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-// create JWT token
+
+//----------------------------------------------------
+// CREATE JWT TOKEN
+//----------------------------------------------------
 const createToken = (user) => {
     return jwt.sign(
-        { userId: user._id, role: user.role },
+        {
+            userId: user.id,
+            role: user.role
+        },
         process.env.JWT_SECRET,
         { expiresIn: "7d" }
     );
 };
 
-// send cookie (FIXED)
+
+//----------------------------------------------------
+// COOKIE SETTER
+//----------------------------------------------------
 const sendAuthCookie = (res, token) => {
     res.cookie("token", token, {
         httpOnly: true,
-        secure: false,       // ✅ FIX for localhost/Postman
-        sameSite: "lax",     // ✅ FIX for cookie not sending issue
+        secure: false,
+        sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000
     });
 };
 
+
+//----------------------------------------------------
 // SIGNUP
+//----------------------------------------------------
 const signup = async (req, res) => {
     try {
         const { name, email, password } = req.body;
@@ -33,7 +46,11 @@ const signup = async (req, res) => {
             });
         }
 
-        const existingUser = await User.findOne({ email });
+        // check user exists
+        const existingUser = await prisma.user.findUnique({
+            where: { email }
+        });
+
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -43,10 +60,13 @@ const signup = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const newUser = await User.create({
-            name,
-            email,
-            password: hashedPassword
+        const newUser = await prisma.user.create({
+            data: {
+                name,
+                email,
+                password: hashedPassword,
+                role: "user"
+            }
         });
 
         const token = createToken(newUser);
@@ -56,7 +76,7 @@ const signup = async (req, res) => {
             success: true,
             message: "Signup successful",
             user: {
-                id: newUser._id,
+                id: newUser.id,
                 name: newUser.name,
                 email: newUser.email,
                 role: newUser.role
@@ -72,7 +92,10 @@ const signup = async (req, res) => {
     }
 };
 
+
+//----------------------------------------------------
 // LOGIN
+//----------------------------------------------------
 const login = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -84,7 +107,10 @@ const login = async (req, res) => {
             });
         }
 
-        const user = await User.findOne({ email });
+        const user = await prisma.user.findUnique({
+            where: { email }
+        });
+
         if (!user) {
             return res.status(401).json({
                 success: false,
@@ -93,6 +119,7 @@ const login = async (req, res) => {
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
+
         if (!isMatch) {
             return res.status(401).json({
                 success: false,
@@ -107,7 +134,7 @@ const login = async (req, res) => {
             success: true,
             message: "Login successful",
             user: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 role: user.role
@@ -123,7 +150,10 @@ const login = async (req, res) => {
     }
 };
 
+
+//----------------------------------------------------
 // LOGOUT
+//----------------------------------------------------
 const logout = (req, res) => {
     res.clearCookie("token", {
         httpOnly: true,
@@ -137,7 +167,10 @@ const logout = (req, res) => {
     });
 };
 
+
+//----------------------------------------------------
 // PROFILE
+//----------------------------------------------------
 const profile = async (req, res) => {
     try {
         const userId = req.user?.userId;
@@ -149,7 +182,15 @@ const profile = async (req, res) => {
             });
         }
 
-        const user = await User.findById(userId).select("name email role");
+        const user = await prisma.user.findUnique({
+            where: { id: Number(userId) },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true
+            }
+        });
 
         if (!user) {
             return res.status(404).json({
@@ -172,6 +213,10 @@ const profile = async (req, res) => {
     }
 };
 
+
+//----------------------------------------------------
+// EXPORT
+//----------------------------------------------------
 module.exports = {
     signup,
     login,

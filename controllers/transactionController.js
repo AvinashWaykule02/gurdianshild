@@ -1,48 +1,63 @@
+const prisma = require("../config/prisma");
 const {
   createTransaction,
-  getTransactions
+  getTransactions,
+  getTransactionById,
 } = require('../services/transactionService');
 
 
 //---------------------------------------------------------------
-// Create New Transaction
+// CREATE TRANSACTION CONTROLLER
+//---------------------------------------------------------------
 async function createTransactionHandler(req, res) {
   try {
 
-   
-    const userId = req.user.userId;
+    // ✅ AUTH CHECK
+    const userId = req.user?.userId;
 
     if (!userId) {
       return res.status(401).json({
-        error: 'Unauthorized'
+        success: false,
+        message: 'Unauthorized access'
       });
     }
 
-    const {
-      amount,
-      type,
-      description,
-      metadata
-    } = req.body;
+    const { amount, description, type } = req.body;
 
-    // Call service layer
-    const result = await createTransaction(userId, {
-      amount,
-      type,
+
+    // ❌ BASIC VALIDATION (important for production)
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount is required and must be a positive number'
+      });
+    }
+
+    // ✅ SERVICE CALL (DB + ACID + HASH + LOG)
+    const { transaction, outboxEvent } = await createTransaction(userId, {
+      amount: Number(amount),
       description,
-      metadata
+      type: type?.toUpperCase(),
     });
 
     return res.status(201).json({
-      message: 'Transaction created',
-      transaction: result.transaction,
-      auditHash: result.currentHash,
+      success: true,
+      message: "Transaction created. Outbox event queued for processing.",
+      data: {
+        transaction,
+        outbox: {
+          id: String(outboxEvent.id),
+          status: outboxEvent.status,
+        },
+      },
     });
 
   } catch (err) {
     console.error('createTransaction error:', err);
 
     return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
       error: err.message
     });
   }
@@ -50,37 +65,83 @@ async function createTransactionHandler(req, res) {
 
 
 //---------------------------------------------------------------
-// Get All Transactions
+// GET ALL TRANSACTIONS CONTROLLER
+//---------------------------------------------------------------
 async function getAllTransactions(req, res) {
   try {
 
-   
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
 
     if (!userId) {
       return res.status(401).json({
-        error: 'Unauthorized'
+        success: false,
+        message: 'Unauthorized access'
       });
     }
 
     const transactions = await getTransactions(userId);
 
     return res.status(200).json({
-      transactions
+      success: true,
+      count: transactions.length,
+      data: transactions
     });
 
   } catch (err) {
     console.error('getTransactions error:', err);
 
     return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
       error: err.message
     });
   }
 }
 
+//---------------------------------------------------------------
+// GET TRANSACTION BY ID CONTROLLER
+//---------------------------------------------------------------
+async function getTransactionByIdHandler(req, res) {
+  try {
+    const userId = req.user?.userId;
 
-// Export controllers
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized access'
+      });
+    }
+
+    const { id } = req.params;
+    const transaction = await getTransactionById(id);
+
+    if (transaction.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: not your transaction'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: transaction
+    });
+  } catch (err) {
+    console.error('getTransactionById error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: err.message
+    });
+  }
+}
+
+//---------------------------------------------------------------
+// EXPORT CONTROLLERS
+//---------------------------------------------------------------
 module.exports = {
   createTransactionHandler,
-  getAllTransactions
+  getAllTransactions,
+  getTransactionById: getTransactionByIdHandler
 };

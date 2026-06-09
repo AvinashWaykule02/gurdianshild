@@ -1,14 +1,29 @@
-const express = require('express');
-const router  = express.Router();
+const express = require("express");
+const router = express.Router();
+
+const authMiddleware = require("../middleware/authMiddleware");
+
 const {
   verifyIntegrity,
   getIncidents,
-} = require('../controllers/securityController');
+} = require("../controllers/securityController");
 
-// GET /security/verify?userId=xxx  — run full hash chain check
-router.get('/verify', verifyIntegrity);
+/*
+|--------------------------------------------------------------------------
+| SECURITY ROUTES
+|--------------------------------------------------------------------------
+| All routes are protected and related to audit + integrity system
+|--------------------------------------------------------------------------
+*/
 
-// GET /security/incidents?userId=xxx — list all incidents
-router.get('/incidents', getIncidents);
+/**
+ * FULL HASH CHAIN VERIFICATION
+ */
+router.get("/verify", authMiddleware, verifyIntegrity);
+
+/**
+ * SECURITY / AUDIT INCIDENTS
+ */
+router.get("/incidents", authMiddleware, getIncidents);
 
 module.exports = router;

@@ -1,109 +1,115 @@
-const SecurityLog = require('../models/securityLogs');
-const SecurityIncident = require('../models/securityIncident');
-const Transaction = require('../models/transaction');
-const { generateHash } = require('./generateHash');
+const prisma = require("../config/prisma");
+const { generateHash } = require("./generateHash");
 
+/*
+|--------------------------------------------------------------------------
+| BUILD SNAPSHOT (for integrity comparison)
+|--------------------------------------------------------------------------
+*/
 function buildTransactionSnapshot(transaction) {
   if (!transaction) return null;
 
   return {
-    _id: transaction._id.toString(),
-    userId: transaction.userId.toString(),
-    amount: transaction.amount,
-    type: transaction.type,
+    id: transaction.id,
+    userId: transaction.userId,
+    amount:
+      typeof transaction.amount === "object" &&
+        typeof transaction.amount.toString === "function"
+        ? transaction.amount.toString()
+        : transaction.amount,
     description: transaction.description,
-    status: transaction.status,
     createdAt: transaction.createdAt,
   };
 }
 
-function snapshotsMatch(storedSnapshot, liveSnapshot) {
-  if (!storedSnapshot || !liveSnapshot) return false;
+/*
+|--------------------------------------------------------------------------
+| SNAPSHOT COMPARE
+|--------------------------------------------------------------------------
+*/
+function snapshotsMatch(stored, live) {
+  if (!stored || !live) return false;
+
   return (
-    storedSnapshot._id === liveSnapshot._id &&
-    storedSnapshot.userId === liveSnapshot.userId &&
-    storedSnapshot.amount === liveSnapshot.amount &&
-    storedSnapshot.type === liveSnapshot.type &&
-    storedSnapshot.description === liveSnapshot.description &&
-    storedSnapshot.status === liveSnapshot.status &&
-    new Date(storedSnapshot.createdAt).toISOString() === new Date(liveSnapshot.createdAt).toISOString()
+    stored.id === live.id &&
+    stored.userId === live.userId &&
+    stored.amount === live.amount &&
+    stored.description === live.description
   );
 }
 
-/**
- * Verifies the entire hash chain for a specific user.
- * - Fetches all SecurityLogs for the user in creation order
- * - Recalculates each hash using (transactionData, previousHash, timestamp)
- * - If stored hash !== recalculated hash → tampering detected
- * - If the live transaction record differs from the stored snapshot → tampering detected
- *   → creates a SecurityIncident document
- *
- * @param {string|ObjectId} userId
- * @returns {{ valid: boolean, totalChecked: number, incidents: Array }}
- */
+/*
+|--------------------------------------------------------------------------
+| VERIFY FULL HASH CHAIN (CORE FUNCTION)
+|--------------------------------------------------------------------------
+*/
 async function verifyUserHashChain(userId) {
-  const logs = await SecurityLog
-    .find({ userId })
-    .sort({ _id: 1 }); // oldest first → traverse chain forward
+  const logs = await prisma.securityLog.findMany({
+    orderBy: {
+      sequenceNumber: "asc",
+    },
+    include: {
+      transaction: true,
+    },
+  });
 
   const incidents = [];
-  const transactionIds = logs.map((log) => log.transactionId);
-  const transactions = await Transaction
-    .find({ _id: { $in: transactionIds } })
-    .lean();
-
-  const transactionsById = new Map(
-    transactions.map((transaction) => [transaction._id.toString(), transaction])
-  );
+  let userLogCount = 0;
 
   for (let i = 0; i < logs.length; i++) {
     const log = logs[i];
-    const expectedPreviousHash = i === 0 ? null : logs[i - 1].currentHash;
-    const recalculated = generateHash(
-      log.transactionData,
+
+    const expectedPreviousHash =
+      i === 0 ? null : logs[i - 1].currentHash;
+
+    const recalculatedHash = generateHash(
+      log.auditData,
       expectedPreviousHash,
-      log.timestamp
+      log.createdAt
     );
 
     let compromised = false;
-    let reason = 'hash_mismatch';
+    let reason = "hash_mismatch";
 
-    if (recalculated !== log.currentHash) {
+    if (recalculatedHash !== log.currentHash) {
       compromised = true;
     } else {
-      const liveTransaction = transactionsById.get(log.transactionId.toString());
+      const liveTransaction = log.transaction;
       const liveSnapshot = buildTransactionSnapshot(liveTransaction);
-      if (!snapshotsMatch(log.transactionData, liveSnapshot)) {
+
+      if (!snapshotsMatch(log.auditData, liveSnapshot)) {
         compromised = true;
-        reason = 'transaction_mismatch';
+        reason = "transaction_tampered";
       }
     }
 
-    if (compromised) {
-      const incident = await SecurityIncident.create({
-        affectedUser: userId,
-        affectedTransaction: log.transactionId,
-        expectedHash: log.currentHash,
-        recalculatedHash: recalculated,
-        detectedAt: new Date(),
-        severity: 'CRITICAL',
-        securityLogId: log._id,
-      });
+    if (log.transaction.userId === Number(userId)) {
+      userLogCount += 1;
 
-      incidents.push({
-        logId: log._id,
-        transactionId: log.transactionId,
-        expectedHash: log.currentHash,
-        recalculatedHash: recalculated,
-        reason,
-        incident: incident._id,
-      });
+      if (compromised) {
+        const incident = await prisma.verificationRun.create({
+          data: {
+            status: "COMPROMISED",
+            checkedLogs: i + 1,
+            failedLogs: 1,
+            startedAt: new Date(),
+            completedAt: new Date(),
+          },
+        });
+
+        incidents.push({
+          logId: log.id,
+          transactionId: log.transactionId,
+          reason,
+          verificationId: incident.id,
+        });
+      }
     }
   }
 
   return {
     valid: incidents.length === 0,
-    totalChecked: logs.length,
+    totalChecked: userLogCount,
     incidents,
   };
 }

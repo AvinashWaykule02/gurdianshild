@@ -1,15 +1,27 @@
 const express = require('express');
-const router  = express.Router();
+const router = express.Router();
+
 const authMiddleware = require("../middleware/authMiddleware");
+
 const {
   createTransactionHandler,
   getAllTransactions,
+  getTransactionById,
 } = require('../controllers/transactionController');
 
-// POST /transaction/create
-router.post('/create', authMiddleware, createTransactionHandler);
 
-// GET  /transaction/all?userId=xxx
-router.get('/all', authMiddleware, getAllTransactions);
+//----------------------------------------------------
+// TRANSACTION ROUTES (PROTECTED)
+//----------------------------------------------------
+
+// Create a new transaction
+router.post(
+  '/create',
+  authMiddleware,
+  createTransactionHandler
+);
+
+// Get transaction by id
+router.get("/:id", authMiddleware, getTransactionById);
 
 module.exports = router;

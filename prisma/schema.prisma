@@ -1,0 +1,156 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//////////////////////
+// ENUMS
+//////////////////////
+
+enum Role {
+  user
+  admin
+  auditor
+  high_authority
+}
+
+//////////////////////
+// USER
+//////////////////////
+
+model User {
+  id        Int      @id @default(autoincrement())
+
+  name      String
+  email     String   @unique
+  password  String
+
+  role      Role     @default(user)
+
+  createdAt DateTime @default(now())
+  
+  transactions Transaction[]
+
+  @@index([email])
+}
+
+//////////////////////
+// TRANSACTION
+//////////////////////
+
+model Transaction {
+  id Int @id @default(autoincrement())
+
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
+  amount Decimal @db.Decimal(10,2)
+
+  description String
+
+  createdAt DateTime @default(now())
+
+  logs SecurityLog[]
+
+  @@index([userId])
+}
+
+//////////////////////
+// TRANSACTIONAL OUTBOX
+//////////////////////
+
+model AuditOutbox {
+  id BigInt @id @default(autoincrement())
+
+  transactionId Int
+
+  payload Json
+
+  status String @default("PENDING")
+
+  createdAt DateTime @default(now())
+
+  processedAt DateTime?
+
+  @@index([status])
+}
+
+//////////////////////
+// HASH CHAIN STATE
+//////////////////////
+
+model SecurityChainState {
+  id Int @id @default(1)
+
+  latestSequence Int @default(0)
+
+  latestHash String
+
+  updatedAt DateTime @updatedAt
+}
+
+//////////////////////
+// SECURITY LOG
+//////////////////////
+
+model SecurityLog {
+  id Int @id @default(autoincrement())
+
+  sequenceNumber Int @unique
+
+  transactionId Int
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+
+  previousHash String?
+
+  currentHash String
+
+  hmacSignature String
+
+  auditData Json
+
+  createdAt DateTime @default(now())
+
+  @@index([sequenceNumber])
+  @@index([transactionId])
+}
+
+//////////////////////
+// S3 CHECKPOINTS
+//////////////////////
+
+model AuditAnchor {
+  id Int @id @default(autoincrement())
+
+  sequenceNumber Int
+
+  anchorHash String
+
+  s3Key String
+
+  uploadedAt DateTime @default(now())
+
+  @@index([sequenceNumber])
+}
+
+//////////////////////
+// VERIFICATION RUNS
+//////////////////////
+
+model VerificationRun {
+  id Int @id @default(autoincrement())
+
+  status String
+
+  checkedLogs Int @default(0)
+
+  failedLogs Int @default(0)
+
+  startedAt DateTime @default(now())
+
+  completedAt DateTime?
+}

@@ -1,45 +1,56 @@
-const crypto = require('crypto');
-
-
+const crypto = require("crypto");
 
 /*
 |--------------------------------------------------------------------------
-| Generate Secure Hash
+| Generate Secure Audit Hash (Chain-based integrity)
 |--------------------------------------------------------------------------
-| This hash is generated using:
-|
-| 1. Transaction snapshot data
-| 2. Previous transaction hash
-| 3. Timestamp
-|
-| This creates a blockchain-like chain.
+| Ensures:
+| - deterministic hashing
+| - stable object ordering
+| - chain linking via previousHash
 |--------------------------------------------------------------------------
 */
 
-function generateHash(
-  transactionData,
-  previousHash,
-  timestamp
-) {
+/**
+ * Deep normalize object for consistent hashing
+ */
+function normalize(value) {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
 
-  //Create Payload Object
-  const payload = {   
-    transactionData,  // Immutable transaction snapshot   
-    previousHash: previousHash || 'GENESIS',  // Previous chain hash
-    timestamp: new Date(timestamp).toISOString(),  // Standardized timestamp
-  };
-  // Convert Object To String
-  const payloadString = JSON.stringify(payload);
+  if (Array.isArray(value)) {
+    return value.map(normalize);
+  }
 
-  //Generate SHA-256 Hash
-  const hash = crypto
-    .createHash('sha256')
-    .update(payloadString)
-    .digest('hex');
+  if (typeof value.toJSON === "function") {
+    return normalize(value.toJSON());
+  }
 
-  //  Return Final Hash
-  return hash;
+  const sortedKeys = Object.keys(value).sort();
+  const result = {};
+
+  for (const key of sortedKeys) {
+    result[key] = normalize(value[key]);
+  }
+
+  return result;
 }
 
-module.exports = {  generateHash};
- 
+/**
+ * Generate SHA-256 hash for audit chain
+ */
+function generateHash(transactionData, previousHash, timestamp) {
+  const payload = {
+    transactionData: normalize(transactionData),
+    previousHash: previousHash || "GENESIS",
+    timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString(),
+  };
+
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex");
+}
+
+module.exports = { generateHash };
