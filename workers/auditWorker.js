@@ -2,12 +2,16 @@
 //
 // AUDIT WORKER — Processes BullMQ jobs sequentially (FIFO safe)
 // Builds a cryptographic hash chain (SecurityLog) for every transaction.
+// After chain creation, writes a backup record directly to S3.
 
 const { Worker } = require("bullmq");
 const crypto = require("crypto");
 const prisma = require("../config/prisma");
 const connection = require("../config/redis");
 const { generateHash } = require("../algorithams/generateHash");
+const { writeTransactionBackup } = require("../services/s3BackupService");
+const ledgerEventBus = require("../events/ledgerEventBus");
+const { EVENTS } = require("../events/eventTypes");
 
 /*
 |--------------------------------------------------------------------------
@@ -23,7 +27,7 @@ function buildAuditSnapshot(payload) {
         userId: payload.userId,
         amount:
             typeof payload.amount === "object" &&
-            typeof payload.amount.toString === "function"
+                typeof payload.amount.toString === "function"
                 ? payload.amount.toString()
                 : String(payload.amount),
         description: payload.description,
@@ -47,6 +51,10 @@ function generateHmac(data, secret) {
 |--------------------------------------------------------------------------
 | CORE AUDIT PROCESSING — Hash Chain + SecurityLog creation
 |--------------------------------------------------------------------------
+| IDEMPOTENT: If SecurityLog already exists for this transactionId
+| (e.g., on BullMQ retry after DynamoDB failure), we skip PostgreSQL
+| creation and return the existing record. This makes retries safe.
+|--------------------------------------------------------------------------
 */
 async function processEvent(data) {
     const { outboxEventId, transactionId, payload } = data;
@@ -55,6 +63,28 @@ async function processEvent(data) {
     console.log("  Outbox ID:", outboxEventId);
     console.log("  Transaction ID:", transactionId);
 
+    // ── IDEMPOTENCY CHECK ──────────────────────────────────────
+    // If this job is being retried (e.g., S3 backup failed on first attempt),
+    // the SecurityLog already exists in PostgreSQL. Don't create a duplicate.
+    const existingLog = await prisma.securityLog.findFirst({
+        where: { transactionId: transactionId },
+    });
+
+    if (existingLog) {
+        console.log(
+            `[Worker] SecurityLog already exists for txn ${transactionId} (seq #${existingLog.sequenceNumber}) — skipping PostgreSQL, retrying S3 only`
+        );
+
+        return {
+            success: true,
+            securityLogId: existingLog.id,
+            sequenceNumber: existingLog.sequenceNumber,
+            previousHash: existingLog.previousHash,
+            currentHash: existingLog.currentHash,
+        };
+    }
+
+    // ── FIRST ATTEMPT: Create SecurityLog + Update Chain State ─
     const now = new Date();
 
     // 1. Build deterministic snapshot (matches verify format)
@@ -63,14 +93,15 @@ async function processEvent(data) {
     // 2. Atomically: read chain state → create SecurityLog → update chain state
     const result = await prisma.$transaction(async (tx) => {
         // Fetch or create chain state
+        const userIdNum = Number(payload.userId);
         let chainState = await tx.securityChainState.findUnique({
-            where: { id: 1 },
+            where: { userId: userIdNum },
         });
 
         if (!chainState) {
             chainState = await tx.securityChainState.create({
                 data: {
-                    id: 1,
+                    userId: userIdNum,
                     latestSequence: 0,
                     latestHash: "GENESIS",
                 },
@@ -94,6 +125,7 @@ async function processEvent(data) {
         // 5. Create SecurityLog entry
         const securityLog = await tx.securityLog.create({
             data: {
+                userId: userIdNum,
                 sequenceNumber: nextSequence,
                 transactionId: transactionId,
                 previousHash: previousHash,
@@ -106,7 +138,7 @@ async function processEvent(data) {
 
         // 6. Update chain state
         await tx.securityChainState.update({
-            where: { id: 1 },
+            where: { userId: userIdNum },
             data: {
                 latestSequence: nextSequence,
                 latestHash: currentHash,
@@ -117,14 +149,32 @@ async function processEvent(data) {
             `[Worker] SecurityLog #${nextSequence} created for txn ${transactionId}`
         );
 
-        return { success: true, securityLogId: securityLog.id };
+        return {
+            success: true,
+            securityLogId: securityLog.id,
+            sequenceNumber: nextSequence,
+            previousHash: previousHash,
+            currentHash: currentHash,
+        };
     });
 
     return result;
 }
 
 /**
- * BullMQ Worker
+ * BullMQ Worker — ACID GUARANTEE
+ *
+ * Both PostgreSQL (SecurityLog) AND S3 backup must succeed.
+ * If either fails, the job fails and BullMQ retries (3 attempts, exponential backoff).
+ *
+ * Idempotency:
+ *   - processEvent() checks if SecurityLog already exists → skips if yes
+ *   - S3 backup key is deterministic and idempotent by transaction
+ *   - Outbox is only marked PROCESSED after BOTH writes succeed
+ *
+ * Flow:
+ *   Attempt 1: PostgreSQL ✅ → S3 ❌ → Job FAILS → BullMQ retries
+ *   Attempt 2: PostgreSQL SKIPPED (exists) → S3 ✅ → Outbox PROCESSED ✅
  */
 const auditWorker = new Worker(
     "audit-queue",
@@ -132,12 +182,30 @@ const auditWorker = new Worker(
     async (job) => {
         const data = job.data;
 
-        console.log(`\n[Worker] Job started: ${job.id}`);
+        console.log(`\n[Worker] Job started: ${job.id} (attempt ${job.attemptsMade + 1}/${job.opts.attempts || 3})`);
 
-        // 1. Process event — create hash chain entry
+        // ── STEP 1: PostgreSQL SecurityLog (idempotent) ─────────
         const result = await processEvent(data);
 
-        // 2. Mark as processed in DB (source of truth)
+        // ── STEP 2: S3 Audit Backup (MANDATORY) ─────────────
+        // If this throws, BullMQ retries the entire job.
+        await writeTransactionBackup({
+            userId: Number(data.payload.userId),
+            transactionId: data.transactionId,
+            seq: result.sequenceNumber,
+            prevHash: result.previousHash,
+            hash: result.currentHash,
+            transactionData: data.payload,
+            auditLog: {
+                sequenceNumber: result.sequenceNumber,
+                previousHash: result.previousHash,
+                currentHash: result.currentHash,
+                hmacSignature: data.payload.hmacSignature || null,
+            },
+            createdAt: data.payload.createdAt || new Date().toISOString(),
+        });
+
+        // ── STEP 3: Mark outbox PROCESSED (only after BOTH succeed) ─
         await prisma.auditOutbox.update({
             where: { id: data.outboxEventId },
             data: {
@@ -146,7 +214,17 @@ const auditWorker = new Worker(
             },
         });
 
-        console.log(`[Worker] Job completed: ${job.id}`);
+        ledgerEventBus.emitEvent(EVENTS.AUDIT_COMPLETE, {
+            userId: Number(data.payload.userId),
+            message: "Audit pipeline complete",
+            meta: {
+                transactionId: data.transactionId,
+                sequenceNumber: result.sequenceNumber,
+                outboxEventId: data.outboxEventId,
+            },
+        });
+
+        console.log(`[Worker] Job completed: ${job.id} — PostgreSQL ✅ S3 ✅`);
 
         return result;
     },

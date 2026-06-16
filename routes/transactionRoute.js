@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const authMiddleware = require("../middleware/authMiddleware");
+const ledgerMiddleware = require("../middleware/ledgerMiddleware");
 
 const {
   createTransactionHandler,
@@ -18,6 +19,7 @@ const {
 router.post(
   '/create',
   authMiddleware,
+  ledgerMiddleware,
   createTransactionHandler
 );
 

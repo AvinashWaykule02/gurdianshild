@@ -13,7 +13,11 @@ BigInt.prototype.toJSON = function () {
 // ─────────────────────────────────────────────
 const app = express();
 
-require("./workers/auditWorker"); // BullMQ worker starts automatically
+if (process.env.NODE_ENV !== "test") {
+  require("./workers/auditWorker");
+  require("./workers/repairWorker");
+  require("./workers/verificationWorker");
+}
 
 // ─────────────────────────────────────────────
 // SECURITY + MIDDLEWARE
@@ -36,10 +40,14 @@ app.use(morgan("dev"));
 const authRoutes = require("./routes/authRoute");
 const transactionRoutes = require("./routes/transactionRoute");
 const securityRoutes = require("./routes/securityRoute");
+const incidentRoutes = require("./routes/incidentRoute");
+const repairRoutes = require("./routes/repairRoute");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/transaction", transactionRoutes);
 app.use("/api/security", securityRoutes);
+app.use("/api/incidents", incidentRoutes);
+app.use("/api/repair", repairRoutes);
 
 // ─────────────────────────────────────────────
 // HEALTH CHECK

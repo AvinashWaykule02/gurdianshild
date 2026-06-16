@@ -1,3 +1,11 @@
+if (process.env.NODE_ENV === "test") {
+    module.exports = {
+        add: async () => ({ id: "test-job" }),
+        on: () => {},
+    };
+    return;
+}
+
 // src/queues/audit.queue.js
 //
 // AUDIT QUEUE — The single BullMQ queue for all audit events.

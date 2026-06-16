@@ -3,6 +3,8 @@ const app = require("./app");
 const prisma = require("./config/prisma"); // 👈 ADD THIS
 const publisherJob = require("./crone-jobs/outboxSchedule");
 
+const { initSocketServer } = require("./realtime/socketServer");
+
 const PORT = process.env.PORT || 5000;
 
 let server;
@@ -21,11 +23,16 @@ async function startServer() {
     server = app.listen(PORT, async () => {
       console.log(`🚀 Server running on port ${PORT}`);
 
+      // ─────────────────────────────
+      // 3. INITIALIZE SOCKET.IO
+      // ─────────────────────────────
+      initSocketServer(server);
+
       try {
         await publisherJob.start();
         console.log("📦 Outbox publisher started");
       } catch (err) {
-        console.error("[PublisherJob] Failed to start:", err.message);
+        console.error("[StartupJob] Failed to start:", err.message);
         process.exit(1);
       }
     });
@@ -49,7 +56,7 @@ async function gracefulShutdown(signal) {
     publisherJob.stop();
     console.log("🛑 Publisher job stopped");
   } catch (err) {
-    console.error("[Shutdown Error] Publisher job stop failed:", err.message);
+    console.error("[Shutdown Error] Job stop failed:", err.message);
   }
 
   try {

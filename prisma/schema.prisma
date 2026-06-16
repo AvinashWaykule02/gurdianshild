@@ -16,6 +16,10 @@ enum Role {
   admin
   auditor
   high_authority
+  USER
+  AUDITOR
+  SENIOR_MANAGER
+  SUPER_ADMIN
 }
 
 //////////////////////
@@ -34,6 +38,10 @@ model User {
   createdAt DateTime @default(now())
   
   transactions Transaction[]
+  incidents    Incident[]
+  ledgerState  LedgerState?
+  securityChainState SecurityChainState?
+  securityLogs SecurityLog[]
 
   @@index([email])
 }
@@ -84,7 +92,8 @@ model AuditOutbox {
 //////////////////////
 
 model SecurityChainState {
-  id Int @id @default(1)
+  userId Int @id
+  user User @relation(fields: [userId], references: [id])
 
   latestSequence Int @default(0)
 
@@ -100,7 +109,10 @@ model SecurityChainState {
 model SecurityLog {
   id Int @id @default(autoincrement())
 
-  sequenceNumber Int @unique
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
+  sequenceNumber Int
 
   transactionId Int
   transaction Transaction @relation(fields: [transactionId], references: [id])
@@ -115,26 +127,8 @@ model SecurityLog {
 
   createdAt DateTime @default(now())
 
-  @@index([sequenceNumber])
+  @@unique([userId, sequenceNumber])
   @@index([transactionId])
-}
-
-//////////////////////
-// S3 CHECKPOINTS
-//////////////////////
-
-model AuditAnchor {
-  id Int @id @default(autoincrement())
-
-  sequenceNumber Int
-
-  anchorHash String
-
-  s3Key String
-
-  uploadedAt DateTime @default(now())
-
-  @@index([sequenceNumber])
 }
 
 //////////////////////
@@ -153,4 +147,106 @@ model VerificationRun {
   startedAt DateTime @default(now())
 
   completedAt DateTime?
+}
+
+//////////////////////
+// INCIDENT TRACKING
+//////////////////////
+
+enum IncidentStatus {
+  OPEN
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  REPAIRING
+  RESOLVED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Incident {
+  id                Int              @id @default(autoincrement())
+
+  userId            Int
+  user              User             @relation(fields: [userId], references: [id])
+
+  corruptionStartSeq Int             // first corrupted sequence number
+  corruptionEndSeq   Int?            // last corrupted sequence (null if unknown)
+
+  status            IncidentStatus   @default(OPEN)
+  severity          IncidentSeverity @default(HIGH)
+
+  title             String?          // auto-generated or manual summary
+  description       String?          // detailed description of the incident
+
+  detectedBy        String           @default("VERIFICATION_ENGINE") // who/what detected it
+  resolvedBy        Int?             // userId of resolver (admin/auditor)
+  resolution        String?          // resolution notes
+
+  verificationRunId Int?             // link to the verification run that found it
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  resolvedAt        DateTime?
+
+  ledgerStates      LedgerState[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+//////////////////////
+// LEDGER STATE
+//////////////////////
+
+enum LedgerStatus {
+  ACTIVE
+  LOCKED
+  UNDER_REPAIR
+}
+
+model LedgerState {
+  id            Int          @id @default(autoincrement())
+  userId        Int          @unique @map("user_id")
+  user          User         @relation(fields: [userId], references: [id])
+  
+  status        LedgerStatus @default(ACTIVE)
+  
+  lockedAt      DateTime?    @map("locked_at")
+  lockedReason  String?      @map("locked_reason")
+  
+  incidentId    Int?         @map("incident_id")
+  incident      Incident?    @relation(fields: [incidentId], references: [id])
+  
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  @@map("ledger_state")
+  @@index([status])
+}
+
+//////////////////////
+// EVENT LOG (SOCKET EVENTS)
+//////////////////////
+
+model EventLog {
+  id        Int      @id @default(autoincrement())
+  
+  eventName String
+  userId    Int?
+  
+  severity  String   @default("INFO")
+  message   String
+  meta      Json?
+  
+  createdAt DateTime @default(now())
+  
+  @@index([eventName])
+  @@index([userId])
 }

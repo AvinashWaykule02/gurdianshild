@@ -16,7 +16,7 @@ const { verifyUserHashChain } = require("../algorithams/verifyHashchain");
 */
 
 const worker = new Worker(
-  "verificationQueue",
+  "verification-queue",
 
   async (job) => {
     try {

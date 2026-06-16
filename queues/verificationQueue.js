@@ -1,3 +1,11 @@
+if (process.env.NODE_ENV === "test") {
+  module.exports = {
+    add: async () => ({ id: "test-job" }),
+    on: () => {},
+  };
+  return;
+}
+
 const { Queue } = require("bullmq");
 const connection = require("../config/redis");
 
@@ -14,7 +22,7 @@ const connection = require("../config/redis");
 |--------------------------------------------------------------------------
 */
 
-const verificationQueue = new Queue("gs:verificationQueue", {
+const verificationQueue = new Queue("verification-queue", {
   connection,
 
   defaultJobOptions: {

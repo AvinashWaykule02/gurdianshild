@@ -4,6 +4,7 @@ const {
   getTransactions,
   getTransactionById,
 } = require('../services/transactionService');
+const { emit, EVENTS } = require('../services/socketEventService');
 
 
 //---------------------------------------------------------------
@@ -38,6 +39,17 @@ async function createTransactionHandler(req, res) {
       amount: Number(amount),
       description,
       type: type?.toUpperCase(),
+    });
+
+    emit(EVENTS.TRANSACTION_CREATED, {
+      userId,
+      message: "Transaction created",
+      meta: {
+        transactionId: transaction.id,
+        amount: Number(amount),
+        description,
+        outboxStatus: outboxEvent.status,
+      },
     });
 
     return res.status(201).json({
