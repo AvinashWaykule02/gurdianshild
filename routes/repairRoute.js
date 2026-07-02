@@ -7,7 +7,7 @@ const { triggerRepair } = require("../controllers/repairController");
 router.post(
     "/incident", 
     authMiddleware, 
-    rbacMiddleware(["SENIOR_MANAGER", "SUPER_ADMIN", "admin", "high_authority"]), 
+    rbacMiddleware(["SENIOR_MANAGER", "SUPER_ADMIN"]), 
     triggerRepair
 );
 

@@ -90,6 +90,7 @@ async function verifyUserHashChain(userId) {
       const verificationRun = await prisma.verificationRun.create({
         data: {
           status: "COMPROMISED",
+          userId: Number(userId),
           checkedLogs: i + 1,
           failedLogs: 1,
           startedAt: new Date(),

@@ -25,7 +25,7 @@ async function getAllIncidents(req, res) {
     try {
         const filters = buildIncidentQueryFilters(req.query);
 
-        const allowedRoles = ["admin", "SENIOR_MANAGER", "SUPER_ADMIN", "high_authority"];
+        const allowedRoles = ["SENIOR_MANAGER", "SUPER_ADMIN"];
         if (!allowedRoles.includes(req.user?.role)) {
             filters.userId = req.user?.userId;
         }
@@ -59,7 +59,7 @@ async function getIncidentByIdHandler(req, res) {
             });
         }
 
-        const allowedRoles = ["admin", "SENIOR_MANAGER", "SUPER_ADMIN", "high_authority"];
+        const allowedRoles = ["SENIOR_MANAGER", "SUPER_ADMIN"];
         if (!allowedRoles.includes(req.user?.role) && incident.userId !== req.user?.userId) {
             return res.status(403).json({
                 success: false,
@@ -96,7 +96,7 @@ async function updateIncidentStatusHandler(req, res) {
             });
         }
 
-        const allowedRoles = ["admin", "SENIOR_MANAGER", "SUPER_ADMIN", "high_authority"];
+        const allowedRoles = ["SENIOR_MANAGER", "SUPER_ADMIN"];
         if (!allowedRoles.includes(req.user?.role) && incident.userId !== req.user?.userId) {
             return res.status(403).json({
                 success: false,

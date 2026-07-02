@@ -1,50 +1,56 @@
+// TEST MODE (No Redis dependency)
 if (process.env.NODE_ENV === "test") {
-    module.exports = {
-        add: async () => ({ id: "test-job" }),
-        on: () => {},
-    };
-    return;
+  module.exports = {
+    add: async () => ({ id: "test-job" }),
+    on: () => {},
+    process: () => {},
+    close: async () => {},
+    getJobs: async () => [],
+    getJobCounts: async () => ({}),
+    pause: async () => {},
+    resume: async () => {},
+  };
+  return;
 }
 
-// src/queues/audit.queue.js
-//
-// AUDIT QUEUE — The single BullMQ queue for all audit events.
-//
-// Design decisions:
-//   - One queue named "audit-queue". All audit events flow through here.
-//   - defaultJobOptions ensure failed jobs are retried up to 3 times
-//     with exponential backoff before being moved to the failed set.
-//   - removeOnComplete keeps Redis lean — we already have the permanent
-//     record in PostgreSQL (AuditOutbox + SecurityLog tables).
-//   - removeOnFail: false — keep failed jobs in Redis so you can inspect
-//     them in Bull Board / Redis CLI without losing context.
-
+// PRODUCTION MODE (BullMQ + Redis)
 const { Queue } = require("bullmq");
 const connection = require("../config/redis");
 
+// Create single audit queue instance
 const auditQueue = new Queue("audit-queue", {
-    connection,
+  connection,
 
-    defaultJobOptions: {
-        // Retry up to 3 times before marking the job as failed
-        attempts: 3,
-        backoff: {
-            type: "exponential",
-            delay: 2000, // 2s → 4s → 8s
-        },
+  defaultJobOptions: {
+    // Retry failed jobs up to 3 times
+    attempts: 3,
 
-        // Remove completed jobs from Redis after 100 are accumulated
-        // (keeps memory clean — source of truth is PostgreSQL)
-        removeOnComplete: { count: 100 },
-
-        // Keep failed jobs for inspection
-        removeOnFail: false,
+    // Exponential backoff: 2s → 4s → 8s
+    backoff: {
+      type: "exponential",
+      delay: 2000,
     },
+
+    // Keep only last 100 completed jobs (Redis cleanup)
+    removeOnComplete: { count: 100 },
+
+    // Keep last 1000 failed jobs for debugging
+    removeOnFail: { count: 1000 },
+  },
 });
 
-// Log queue-level errors (connection drops, etc.)
+// QUEUE ERROR HANDLING
 auditQueue.on("error", (err) => {
-    console.error("[AuditQueue] Queue error:", err.message);
+  console.error("[AuditQueue] Redis/BullMQ error:", err.message);
 });
+
 
 module.exports = auditQueue;
+
+// queues/auditQueue.js
+//
+// Audit Queue (BullMQ)
+// Single queue used for processing all audit-related events.
+//
+// Test mode → returns a mock queue (no Redis required)
+

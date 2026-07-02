@@ -1,6 +1,6 @@
 require("dotenv").config();
 const app = require("./app");
-const prisma = require("./config/prisma"); // 👈 ADD THIS
+const prisma = require("./config/prisma"); 
 const publisherJob = require("./crone-jobs/outboxSchedule");
 
 const { initSocketServer } = require("./realtime/socketServer");

@@ -30,6 +30,14 @@ async function findIncidents({ userId, status, severity, limit = 100, skip = 0 }
                     email: true,
                 },
             },
+            resolver: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                },
+            },
+            verificationRun: true,
         },
     });
 }
@@ -47,6 +55,14 @@ async function findIncidentById(id) {
                     email: true,
                 },
             },
+            resolver: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                },
+            },
+            verificationRun: true,
         },
     });
 }
@@ -77,6 +93,14 @@ async function updateIncidentStatus(incidentId, status, resolverId) {
                     email: true,
                 },
             },
+            resolver: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                },
+            },
+            verificationRun: true,
         },
     });
 }

@@ -12,10 +12,6 @@ datasource db {
 //////////////////////
 
 enum Role {
-  user
-  admin
-  auditor
-  high_authority
   USER
   AUDITOR
   SENIOR_MANAGER
@@ -33,15 +29,17 @@ model User {
   email     String   @unique
   password  String
 
-  role      Role     @default(user)
+  role      Role     @default(USER)
 
   createdAt DateTime @default(now())
-  
-  transactions Transaction[]
-  incidents    Incident[]
-  ledgerState  LedgerState?
+
+  transactions       Transaction[]
+  incidents          Incident[]        @relation("IncidentOwner")
+  resolvedIncidents  Incident[]        @relation("IncidentResolver")
+  ledgerState        LedgerState?
   securityChainState SecurityChainState?
-  securityLogs SecurityLog[]
+  securityLogs       SecurityLog[]
+  verificationRuns   VerificationRun[]
 
   @@index([email])
 }
@@ -85,6 +83,7 @@ model AuditOutbox {
   processedAt DateTime?
 
   @@index([status])
+  @@index([status, createdAt])
 }
 
 //////////////////////
@@ -138,6 +137,9 @@ model SecurityLog {
 model VerificationRun {
   id Int @id @default(autoincrement())
 
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
   status String
 
   checkedLogs Int @default(0)
@@ -147,6 +149,10 @@ model VerificationRun {
   startedAt DateTime @default(now())
 
   completedAt DateTime?
+
+  incidents Incident[]
+
+  @@index([userId])
 }
 
 //////////////////////
@@ -173,7 +179,7 @@ model Incident {
   id                Int              @id @default(autoincrement())
 
   userId            Int
-  user              User             @relation(fields: [userId], references: [id])
+  user              User             @relation("IncidentOwner", fields: [userId], references: [id])
 
   corruptionStartSeq Int             // first corrupted sequence number
   corruptionEndSeq   Int?            // last corrupted sequence (null if unknown)
@@ -185,10 +191,14 @@ model Incident {
   description       String?          // detailed description of the incident
 
   detectedBy        String           @default("VERIFICATION_ENGINE") // who/what detected it
-  resolvedBy        Int?             // userId of resolver (admin/auditor)
+
+  resolvedBy        Int?
+  resolver          User?            @relation("IncidentResolver", fields: [resolvedBy], references: [id])
+
   resolution        String?          // resolution notes
 
-  verificationRunId Int?             // link to the verification run that found it
+  verificationRunId Int?
+  verificationRun   VerificationRun? @relation(fields: [verificationRunId], references: [id])
 
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -216,15 +226,15 @@ model LedgerState {
   id            Int          @id @default(autoincrement())
   userId        Int          @unique @map("user_id")
   user          User         @relation(fields: [userId], references: [id])
-  
+
   status        LedgerStatus @default(ACTIVE)
-  
+
   lockedAt      DateTime?    @map("locked_at")
   lockedReason  String?      @map("locked_reason")
-  
+
   incidentId    Int?         @map("incident_id")
   incident      Incident?    @relation(fields: [incidentId], references: [id])
-  
+
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
   @@map("ledger_state")
@@ -237,16 +247,16 @@ model LedgerState {
 
 model EventLog {
   id        Int      @id @default(autoincrement())
-  
+
   eventName String
   userId    Int?
-  
+
   severity  String   @default("INFO")
   message   String
   meta      Json?
-  
+
   createdAt DateTime @default(now())
-  
+
   @@index([eventName])
   @@index([userId])
 }

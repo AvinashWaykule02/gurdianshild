@@ -1,4 +1,3 @@
-const prisma = require("../config/prisma");
 const {
   createTransaction,
   getTransactions,
@@ -13,7 +12,7 @@ const { emit, EVENTS } = require('../services/socketEventService');
 async function createTransactionHandler(req, res) {
   try {
 
-    // ✅ AUTH CHECK
+    // AUTH CHECK
     const userId = req.user?.userId;
 
     if (!userId) {
@@ -26,7 +25,7 @@ async function createTransactionHandler(req, res) {
     const { amount, description, type } = req.body;
 
 
-    // ❌ BASIC VALIDATION (important for production)
+    // BASIC VALIDATION 
     if (!amount || isNaN(amount) || amount <= 0) {
       return res.status(400).json({
         success: false,
@@ -34,7 +33,7 @@ async function createTransactionHandler(req, res) {
       });
     }
 
-    // ✅ SERVICE CALL (DB + ACID + HASH + LOG)
+    //  SERVICE CALL (DB + ACID + HASH + LOG)
     const { transaction, outboxEvent } = await createTransaction(userId, {
       amount: Number(amount),
       description,
@@ -125,8 +124,21 @@ async function getTransactionByIdHandler(req, res) {
     }
 
     const { id } = req.params;
+    if( !id || isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid transaction ID'
+      });
+    }
+
     const transaction = await getTransactionById(id);
 
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        message: 'Transaction not found'
+      });
+    }
     if (transaction.userId !== userId) {
       return res.status(403).json({
         success: false,

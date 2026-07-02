@@ -5,7 +5,7 @@ const { EVENT_LIST } = require("../events/eventTypes");
 
 let io;
 
-const ADMIN_ROLES = ["admin", "SUPER_ADMIN", "SENIOR_MANAGER", "high_authority"];
+const ADMIN_ROLES = ["SUPER_ADMIN", "SENIOR_MANAGER", "AUDITOR"];
 
 function broadcast(eventType, payload) {
   if (!io) return;
