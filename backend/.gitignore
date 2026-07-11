@@ -1,0 +1,8 @@
+node_modules
+.env
+/generated/prisma
+END_END_STUDY_GUIDE
+node_modules/
+.env
+dist/
+.vscode/

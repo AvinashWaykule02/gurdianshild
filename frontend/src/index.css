@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────
+   BASE LAYER — global resets & defaults
+   ─────────────────────────────────────────── */
+@layer base {
+  body {
+    @apply bg-surface-900 text-gray-100 font-sans antialiased;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-shield-500/30 text-white;
+  }
+
+  /* Smooth focus rings */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-shield-500/50 ring-offset-2 ring-offset-surface-900;
+  }
+}
+
+/* ───────────────────────────────────────────
+   COMPONENT LAYER — reusable patterns
+   ─────────────────────────────────────────── */
+@layer components {
+
+  /* Glass card used on auth pages */
+  .glass-card {
+    @apply relative overflow-hidden rounded-2xl border border-white/[0.06] bg-surface-800/60 backdrop-blur-xl shadow-2xl shadow-black/40;
+  }
+
+  /* Input fields */
+  .input-field {
+    @apply w-full rounded-xl border border-white/10 bg-surface-700/50 px-4 py-3 text-sm text-gray-100 placeholder-gray-500 transition-all duration-200 hover:border-white/20 focus:border-shield-500/60 focus:bg-surface-700/80 focus:ring-2 focus:ring-shield-500/20 focus:outline-none;
+  }
+
+  /* Primary CTA button */
+  .btn-primary {
+    @apply relative w-full rounded-xl bg-gradient-to-r from-shield-600 to-shield-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-shield-600/25 transition-all duration-200 hover:from-shield-500 hover:to-shield-400 hover:shadow-shield-500/30 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+  }
+
+  /* Subtle link */
+  .link-subtle {
+    @apply text-sm text-gray-400 transition-colors duration-200 hover:text-shield-400;
+  }
+}
+
+/* ───────────────────────────────────────────
+   UTILITY LAYER — one-off helpers
+   ─────────────────────────────────────────── */
+@layer utilities {
+
+  /* Animated gradient background for the auth pages */
+  .bg-auth-gradient {
+    background:
+      radial-gradient(ellipse 80% 60% at 50% -20%, rgba(59, 125, 252, 0.12), transparent),
+      radial-gradient(ellipse 60% 50% at 80% 50%, rgba(26, 66, 222, 0.08), transparent),
+      radial-gradient(ellipse 50% 40% at 20% 80%, rgba(31, 85, 241, 0.06), transparent);
+  }
+
+  /* Grid overlay for visual depth */
+  .bg-grid-overlay {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  /* Shimmer effect on buttons during loading */
+  .shimmer-overlay {
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.08) 50%,
+        transparent 100%);
+    background-size: 200% 100%;
+  }
+}

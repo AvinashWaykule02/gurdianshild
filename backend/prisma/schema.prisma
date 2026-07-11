@@ -1,0 +1,263 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//////////////////////
+// ENUMS
+//////////////////////
+
+enum Role {
+  USER
+  AUDITOR
+  SENIOR_MANAGER
+  SUPER_ADMIN
+}
+
+//////////////////////
+// USER
+//////////////////////
+
+model User {
+  id        Int      @id @default(autoincrement())
+
+  name      String
+  email     String   @unique
+  password  String
+
+  role      Role     @default(USER)
+
+  createdAt DateTime @default(now())
+
+  transactions       Transaction[]
+  incidents          Incident[]        @relation("IncidentOwner")
+  resolvedIncidents  Incident[]        @relation("IncidentResolver")
+  ledgerState        LedgerState?
+  securityChainState SecurityChainState?
+  securityLogs       SecurityLog[]
+  verificationRuns   VerificationRun[]
+
+  @@index([email])
+}
+
+//////////////////////
+// TRANSACTION
+//////////////////////
+
+model Transaction {
+  id Int @id @default(autoincrement())
+
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
+  amount Decimal @db.Decimal(10,2)
+
+  description String
+
+  createdAt DateTime @default(now())
+
+  logs SecurityLog[]
+
+  @@index([userId])
+}
+
+//////////////////////
+// TRANSACTIONAL OUTBOX
+//////////////////////
+
+model AuditOutbox {
+  id BigInt @id @default(autoincrement())
+
+  transactionId Int
+
+  payload Json
+
+  status String @default("PENDING")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  processedAt DateTime?
+
+  @@index([status])
+  @@index([status, createdAt])
+}
+
+//////////////////////
+// HASH CHAIN STATE
+//////////////////////
+
+model SecurityChainState {
+  userId Int @id
+  user User @relation(fields: [userId], references: [id])
+
+  latestSequence Int @default(0)
+
+  latestHash String
+
+  updatedAt DateTime @updatedAt
+}
+
+//////////////////////
+// SECURITY LOG
+//////////////////////
+
+model SecurityLog {
+  id Int @id @default(autoincrement())
+
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
+  sequenceNumber Int
+
+  transactionId Int
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+
+  previousHash String?
+
+  currentHash String
+
+  hmacSignature String
+
+  auditData Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, sequenceNumber])
+  @@index([transactionId])
+}
+
+//////////////////////
+// VERIFICATION RUNS
+//////////////////////
+
+model VerificationRun {
+  id Int @id @default(autoincrement())
+
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
+  status String
+
+  checkedLogs Int @default(0)
+
+  failedLogs Int @default(0)
+
+  startedAt DateTime @default(now())
+
+  completedAt DateTime?
+
+  incidents Incident[]
+
+  @@index([userId])
+}
+
+//////////////////////
+// INCIDENT TRACKING
+//////////////////////
+
+enum IncidentStatus {
+  OPEN
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  REPAIRING
+  RESOLVED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Incident {
+  id                Int              @id @default(autoincrement())
+
+  userId            Int
+  user              User             @relation("IncidentOwner", fields: [userId], references: [id])
+
+  corruptionStartSeq Int             // first corrupted sequence number
+  corruptionEndSeq   Int?            // last corrupted sequence (null if unknown)
+
+  status            IncidentStatus   @default(OPEN)
+  severity          IncidentSeverity @default(HIGH)
+
+  title             String?          // auto-generated or manual summary
+  description       String?          // detailed description of the incident
+
+  detectedBy        String           @default("VERIFICATION_ENGINE") // who/what detected it
+
+  resolvedBy        Int?
+  resolver          User?            @relation("IncidentResolver", fields: [resolvedBy], references: [id])
+
+  resolution        String?          // resolution notes
+
+  verificationRunId Int?
+  verificationRun   VerificationRun? @relation(fields: [verificationRunId], references: [id])
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  resolvedAt        DateTime?
+
+  ledgerStates      LedgerState[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+//////////////////////
+// LEDGER STATE
+//////////////////////
+
+enum LedgerStatus {
+  ACTIVE
+  LOCKED
+  UNDER_REPAIR
+}
+
+model LedgerState {
+  id            Int          @id @default(autoincrement())
+  userId        Int          @unique @map("user_id")
+  user          User         @relation(fields: [userId], references: [id])
+
+  status        LedgerStatus @default(ACTIVE)
+
+  lockedAt      DateTime?    @map("locked_at")
+  lockedReason  String?      @map("locked_reason")
+
+  incidentId    Int?         @map("incident_id")
+  incident      Incident?    @relation(fields: [incidentId], references: [id])
+
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  @@map("ledger_state")
+  @@index([status])
+}
+
+//////////////////////
+// EVENT LOG (SOCKET EVENTS)
+//////////////////////
+
+model EventLog {
+  id        Int      @id @default(autoincrement())
+
+  eventName String
+  userId    Int?
+
+  severity  String   @default("INFO")
+  message   String
+  meta      Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([eventName])
+  @@index([userId])
+}

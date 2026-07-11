@@ -1,0 +1,159 @@
+GuardianShield Testing Guide (API + Unit + Tamper Detection)
+
+1) Prerequisites
+- Start PostgreSQL and Redis.
+- Configure backend/.env:
+  - DATABASE_URL
+  - JWT_SECRET
+  - REDIS_HOST, REDIS_PORT
+  - AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME
+
+2) Start Backend
+- cd backend
+- npm install
+- npm run dev
+- Health check:
+  - GET http://localhost:5000/health
+  - Expected: { "success": true, "message": "Server is running fine ..." }
+
+3) Run Unit + Integration Tests
+- cd backend
+- npm test
+- Includes:
+  - tests/unit/eventTypes.test.js
+  - tests/unit/generateHash.test.js
+  - tests/unit/verifySnapshot.test.js
+  - tests/integration/eventPipeline.test.js
+  - tests/integration/health.test.js
+- Expected: all tests pass.
+
+4) Auth API Testing
+- Signup:
+  POST /api/auth/signup
+  Body:
+  {
+    "name": "Test User",
+    "email": "test@example.com",
+    "password": "password123"
+  }
+- Login:
+  POST /api/auth/login
+  Body:
+  {
+    "email": "test@example.com",
+    "password": "password123"
+  }
+- Save:
+  - cookie "token" (for protected APIs)
+  - token from response body (for Socket.IO auth)
+
+5) Transaction API Testing
+- Create transaction:
+  POST /api/transaction/create
+  Cookie: token
+  Body:
+  {
+    "amount": 100.00,
+    "description": "Test payment",
+    "type": "DEBIT"
+  }
+- Expected:
+  - 201 response
+  - Transaction row in DB
+  - AuditOutbox row with PENDING/PROCESSING then PROCESSED
+  - Socket event: TRANSACTION_CREATED
+  - After worker: AUDIT_COMPLETE
+
+6) Incident APIs Testing
+- List incidents:
+  GET /api/incidents
+- Update incident status:
+  PATCH /api/incidents/:id/status
+  Body:
+  {
+    "status": "APPROVED"
+  }
+- Expected:
+  - Status changed in DB
+  - Socket event: INCIDENT_UPDATED
+
+7) Repair API Testing
+- Trigger repair (admin/high authority role required):
+  POST /api/repair/incident
+  Body:
+  {
+    "incidentId": 1
+  }
+- Expected flow:
+  - REPAIR_STARTED emitted
+  - LEDGER_LOCKED during repair
+  - Ledger restored from S3
+  - LEDGER_UNLOCKED
+  - REPAIR_COMPLETED
+
+8) Verification API Testing
+- Verify integrity:
+  GET /api/security/verify
+  (or GET /api/security/verify?userId=<id> for privileged use)
+- Expected (no tamper):
+  - integrity == VERIFIED
+  - Socket events include VERIFICATION_STARTED and VERIFICATION_OK
+
+9) Tamper Detection Test (Important)
+- Purpose: prove chain tamper detection + incident + ledger lock.
+
+Step A: Create some transactions first (at least 2-3).
+Step B: Manually tamper one security log in DB, example:
+  UPDATE "SecurityLog"
+  SET "currentHash" = 'tampered_hash'
+  WHERE "userId" = <userId> AND "sequenceNumber" = 1;
+
+Step C: Call verification:
+  GET /api/security/verify?userId=<userId>
+
+Expected:
+- Verification returns COMPROMISED (or valid=false in internal result).
+- Incident created in Incident table.
+- LedgerState becomes LOCKED for that user.
+- EventLog contains:
+  - TAMPER_DETECTED
+  - LEDGER_LOCKED
+  - INCIDENT_CREATED
+
+10) DB Tables to Check ("depo and all related things")
+- User
+- Transaction
+- AuditOutbox
+- SecurityLog
+- SecurityChainState
+- VerificationRun
+- Incident
+- LedgerState
+- EventLog
+
+11) Event Validation Checklist
+- Transaction flow:
+  TRANSACTION_CREATED -> AUDIT_COMPLETE
+- Verification clean flow:
+  VERIFICATION_STARTED -> VERIFICATION_OK
+- Tamper flow:
+  VERIFICATION_STARTED -> TAMPER_DETECTED -> LEDGER_LOCKED -> INCIDENT_CREATED
+- Repair flow:
+  REPAIR_STARTED -> LEDGER_LOCKED -> LEDGER_UNLOCKED -> REPAIR_COMPLETED
+
+12) Socket Client Quick Check
+- Connect with token to Socket.IO server:
+  - namespace: default
+  - auth: { token: "<jwt>" }
+- Subscribe to:
+  TRANSACTION_CREATED, AUDIT_COMPLETE, VERIFICATION_STARTED, VERIFICATION_OK,
+  TAMPER_DETECTED, INCIDENT_CREATED, INCIDENT_UPDATED, LEDGER_LOCKED,
+  LEDGER_UNLOCKED, REPAIR_STARTED, REPAIR_COMPLETED
+
+13) Common Failure Reasons
+- Redis down -> queue/worker processing fails.
+- Wrong JWT_SECRET -> auth and socket token verification fail.
+- Missing S3 credentials/bucket access -> repair or backup-related failures.
+- Role mismatch -> repair endpoint forbidden.
+
+End of testing guide.
